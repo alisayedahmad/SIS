@@ -1,0 +1,30 @@
+seed: 42
+task: buildings
+num_classes: 2   # background, building
+model:
+  name: unet
+  encoder: resnet34
+  in_channels: 3
+  decoder_channels: [256, 128, 64, 32, 16]
+train:
+  batch_size: 8
+  max_epochs: 50
+  lr: 3e-4
+  weight_decay: 1e-4
+  num_workers: 4
+  precision: 16
+  amp: true
+  scheduler: onecycle
+data:
+  root: data/tiles/spacenet2
+  size: 512
+  mean: [0.485, 0.456, 0.406]
+  std:  [0.229, 0.224, 0.225]
+  augment:
+    hflip: true
+    vflip: false
+    rotate: 15
+    brightness: 0.1
+    contrast: 0.1
+loss: bce_dice
+monitor: val_mIoU

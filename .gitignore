@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+wandb/
+lightning_logs/
+outputs/
+.data/
+.ipynb_checkpoints/
+*.ckpt
+*.pt

@@ -1,0 +1,28 @@
+seed: 1337
+task: roads
+num_classes: 2   # background, road
+model:
+  name: deeplabv3plus
+  encoder: resnet101
+  in_channels: 3
+train:
+  batch_size: 6
+  max_epochs: 60
+  lr: 2e-4
+  weight_decay: 1e-4
+  num_workers: 4
+  precision: 16
+  amp: true
+  scheduler: onecycle
+data:
+  root: data/tiles/spacenet3
+  size: 512
+  mean: [0.485, 0.456, 0.406]
+  std:  [0.229, 0.224, 0.225]
+  augment:
+    hflip: true
+    rotate: 10
+    brightness: 0.1
+    contrast: 0.1
+loss: focal_dice
+monitor: val_mIoU
