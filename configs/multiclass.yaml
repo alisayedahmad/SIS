@@ -1,29 +1,52 @@
+# Configuration multi-classes
+name: unet_multiclass_v2
 seed: 2025
 task: multi
-num_classes: 3   # background, building, road
+num_classes: 3  # background, building, road
+
 model:
   name: unet
   encoder: resnet50
   in_channels: 3
   decoder_channels: [256, 128, 64, 32, 16]
+  use_attention: true
+  dropout: 0.15
+  pretrained: true
+
 train:
   batch_size: 8
   max_epochs: 80
-  lr: 2e-4
-  weight_decay: 1e-4
+  lr: 2.0e-4
+  weight_decay: 1.0e-4
+  optimizer: adamw
+  scheduler: cosine
   num_workers: 4
-  precision: 16
+  precision: "16-mixed"
   amp: true
-  scheduler: onecycle
+  gradient_clip_val: 1.0
+  use_ema: true
+  ema_decay: 0.999
+
 data:
   root: data/tiles/deepglobe
   size: 512
   mean: [0.485, 0.456, 0.406]
-  std:  [0.229, 0.224, 0.225]
+  std: [0.229, 0.224, 0.225]
+  
   augment:
     hflip: true
     rotate: 20
-    brightness: 0.1
-    contrast: 0.1
+    shift_scale: true
+    brightness: 0.15
+    contrast: 0.15
+    blur: true
+    noise: true
+
 loss: tversky
-monitor: val_mIoU
+
+metrics:
+  monitor: val_mIoU
+  compute_apls: false
+
+logging:
+  type: tensorboard

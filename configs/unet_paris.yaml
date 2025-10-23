@@ -1,0 +1,52 @@
+name: unet_paris_buildings
+seed: 42
+task: buildings
+num_classes: 2
+
+model:
+  name: unet
+  encoder: resnet34
+  in_channels: 3
+  decoder_channels: [256, 128, 64, 32, 16]
+  use_attention: false
+  dropout: 0.1
+  pretrained: true
+
+train:
+  batch_size: 8
+  max_epochs: 50
+  lr: 3.0e-4
+  weight_decay: 1.0e-4
+  optimizer: adamw
+  scheduler: onecycle
+  num_workers: 4
+  precision: "16-mixed"
+  use_ema: true
+  early_stopping: true
+  early_stopping_patience: 10
+
+data:
+  root: data/tiles/spacenet2_paris  # 🎯 Votre dossier de tuiles
+  size: 512
+  mean: [0.485, 0.456, 0.406]
+  std: [0.229, 0.224, 0.225]
+  augment:
+    hflip: true
+    vflip: false
+    rotate: 15
+    brightness: 0.1
+    contrast: 0.1
+
+loss: bce_dice
+
+metrics:
+  monitor: val_mIoU
+  compute_apls: false
+
+logging:
+  type: tensorboard
+  project: sat-segmentation
+
+checkpoint:
+  dirpath: checkpoints/unet_paris
+  save_top_k: 3

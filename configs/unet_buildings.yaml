@@ -1,30 +1,76 @@
+# Configuration pour U-Net - Segmentation de bâtiments
+name: unet_buildings_v2
 seed: 42
 task: buildings
-num_classes: 2   # background, building
+num_classes: 2  # background, building
+
+# Modèle
 model:
   name: unet
-  encoder: resnet34
+  encoder: resnet34  # resnet34, resnet50, efficientnet_b0
   in_channels: 3
   decoder_channels: [256, 128, 64, 32, 16]
+  use_attention: false  # Activer les attention gates
+  dropout: 0.1
+  pretrained: true
+
+# Entraînement
 train:
   batch_size: 8
   max_epochs: 50
-  lr: 3e-4
-  weight_decay: 1e-4
+  lr: 3.0e-4
+  weight_decay: 1.0e-4
+  optimizer: adamw  # adamw, sgd
+  scheduler: onecycle  # onecycle, cosine, plateau
   num_workers: 4
-  precision: 16
+  precision: "16-mixed"  # 32, 16-mixed, bf16-mixed
   amp: true
-  scheduler: onecycle
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 1
+  val_check_interval: 1.0
+  log_every_n_steps: 50
+  
+  # Options avancées
+  use_ema: true
+  ema_decay: 0.999
+  early_stopping: true
+  early_stopping_patience: 10
+  monitor_gpu: true
+  prefetch_factor: 2
+  persistent_workers: true
+
+# Données
 data:
   root: data/tiles/spacenet2
   size: 512
   mean: [0.485, 0.456, 0.406]
-  std:  [0.229, 0.224, 0.225]
+  std: [0.229, 0.224, 0.225]
+  
   augment:
     hflip: true
     vflip: false
     rotate: 15
+    shift_scale: true
     brightness: 0.1
     contrast: 0.1
-loss: bce_dice
-monitor: val_mIoU
+    blur: true
+    noise: false
+
+# Perte
+loss: bce_dice  # bce_dice, focal_dice, tversky
+
+# Métriques
+metrics:
+  monitor: val_mIoU
+  compute_apls: false  # Coûteux, désactiver en train
+
+# Logging
+logging:
+  type: tensorboard  # tensorboard, wandb
+  project: sat-segmentation
+  
+# Checkpoint
+checkpoint:
+  dirpath: checkpoints/unet_buildings
+  save_top_k: 3
+  save_last: true
