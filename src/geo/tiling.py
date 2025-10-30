@@ -57,7 +57,6 @@ def _gen_slices(
             w = min(size, W - x)
             yield (y, x, h, w)
 
-
 def tile_array(
     arr: np.ndarray,
     size: int = 512,
@@ -67,38 +66,42 @@ def tile_array(
 ) -> List[Tuple[Tuple[int, int, int, int], np.ndarray]]:
     """
     Découpe un tableau en tuiles avec options avancées.
-    
+
     Args:
-        arr: Array (C,H,W) ou (H,W)
-        size: Taille de tuile
-        overlap: Chevauchement
-        min_coverage: Couverture minimale pour inclure une tuile (0-1)
+        arr: Tableau (C, H, W) ou (H, W)
+        size: Taille de la tuile (en pixels)
+        overlap: Chevauchement entre tuiles (en pixels)
+        min_coverage: Couverture minimale (0–1) pour inclure une tuile non vide
         pad_mode: Mode de padding ('reflect', 'edge', 'constant')
-    
+
     Returns:
-        Liste de (coords, tile_array)
+        Liste de tuples (coords, tile_array)
+        - coords: (y, x, h, w)
+        - tile_array: np.ndarray (C, size, size)
     """
+    # Normalisation des dimensions
     if arr.ndim == 2:
-        arr = arr[None, ...]
-    
+        arr = arr[None, ...]  # -> (1, H, W)
+    elif arr.ndim != 3:
+        raise ValueError(f"Le tableau doit être 2D ou 3D, obtenu: {arr.shape}")
+
     C, H, W = arr.shape
-    
     logger.info(f"Tuilage: {arr.shape} -> tuiles {size}×{size} (overlap={overlap})")
-    
+
     tiles = []
-    
+
+    # ✅ Vérifie que _gen_slices est défini et renvoie bien (y, x, h, w)
     for coords in _gen_slices(H, W, size, overlap):
         y, x, h, w = coords
         tile = arr[:, y:y+h, x:x+w]
-        
-        # Vérifier la couverture (éviter les tuiles vides)
-        if tile.sum() > 0:
-            coverage = (tile != 0).sum() / tile.size
-            if coverage < min_coverage:
-                logger.debug(f"Tuile ignorée (couverture={coverage:.2%})")
-                continue
-        
-        # Padding si nécessaire
+
+        # Calcul de couverture seulement si utile
+        coverage = np.count_nonzero(tile) / tile.size
+        if coverage < min_coverage:
+            logger.debug(f"Tuile ignorée (couverture={coverage:.2%})")
+            continue
+
+        # ✅ Padding si la tuile est partielle
         if h < size or w < size:
             pad_h = size - h
             pad_w = size - w
@@ -107,11 +110,10 @@ def tile_array(
                 ((0, 0), (0, pad_h), (0, pad_w)),
                 mode=pad_mode
             )
-        
+
         tiles.append((coords, tile))
-    
+
     logger.info(f"Nombre de tuiles générées: {len(tiles)}")
-    
     return tiles
 
 

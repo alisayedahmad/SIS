@@ -69,3 +69,5 @@ pytest -q
 
 ## 📁 Structure
 Voir l’arborescence dans ce dépôt. Chaque module possède des docstrings détaillées.
+
+P.S: project need a litle bit of tests only, Thank you .

@@ -10,11 +10,10 @@ import json
 import numpy as np
 import rasterio
 from rasterio.windows import Window
-from shapely.geometry import shape, mapping
 import geopandas as gpd
 from tqdm import tqdm
 import logging
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any,Optional
 
 from src.geo.io import read_geotiff, write_geotiff_like
 from src.geo.tiling import tile_array, save_tiles_manifest
@@ -34,7 +33,7 @@ class SpaceNet2Preprocessor:
         tile_size: int = 512,
         overlap: int = 64,
         min_building_area: float = 20.0,
-        class_map: Dict[str, int] = None,
+        class_map: Optional[Dict[str, int]] = None,
         property_key: str = "type"
     ):
         self.root = Path(root)
