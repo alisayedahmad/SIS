@@ -52,7 +52,7 @@ def _gen_slices(
     
     for y in ys:
         for x in xs:
-            # Calculer la taille effective (peut être < size aux bords)
+            # La taille effective peut être inférieure à size sur les bords
             h = min(size, H - y)
             w = min(size, W - x)
             yield (y, x, h, w)
@@ -61,7 +61,7 @@ def tile_array(
     arr: np.ndarray,
     size: int = 512,
     overlap: int = 64,
-    min_coverage: float = 0.5,
+    min_coverage: float = 0.0,
     pad_mode: str = 'reflect'
 ) -> List[Tuple[Tuple[int, int, int, int], np.ndarray]]:
     """
@@ -71,7 +71,16 @@ def tile_array(
         arr: Tableau (C, H, W) ou (H, W)
         size: Taille de la tuile (en pixels)
         overlap: Chevauchement entre tuiles (en pixels)
-        min_coverage: Couverture minimale (0–1) pour inclure une tuile non vide
+        min_coverage: Couverture minimale (0-1, pixels non-nuls) pour inclure une
+            tuile. Par défaut 0.0 (aucun filtrage) : la grille de tuiles est
+            entièrement déterministe et ne dépend pas du contenu du tableau.
+            ATTENTION: si vous tuilez une image et son masque séparément, ne
+            passez PAS un min_coverage > 0 sur un seul des deux tableaux, sinon
+            les listes de tuiles résultantes ne seront plus alignées coordonnée
+            par coordonnée (et peuvent même différer en longueur). Si vous
+            voulez filtrer les tuiles "vides", tuilez d'abord avec
+            min_coverage=0.0 puis filtrez les paires (image, masque) ensemble
+            en utilisant la couverture du masque.
         pad_mode: Mode de padding ('reflect', 'edge', 'constant')
 
     Returns:
@@ -90,18 +99,18 @@ def tile_array(
 
     tiles = []
 
-    # ✅ Vérifie que _gen_slices est défini et renvoie bien (y, x, h, w)
+    # Itération sur les tuiles générées par _gen_slices
     for coords in _gen_slices(H, W, size, overlap):
         y, x, h, w = coords
         tile = arr[:, y:y+h, x:x+w]
 
-        # Calcul de couverture seulement si utile
+        # Vérifier si la couverture respecte le seuil requis
         coverage = np.count_nonzero(tile) / tile.size
         if coverage < min_coverage:
             logger.debug(f"Tuile ignorée (couverture={coverage:.2%})")
             continue
 
-        # ✅ Padding si la tuile est partielle
+        # Appliquer du padding si la tuile est partielle
         if h < size or w < size:
             pad_h = size - h
             pad_w = size - w
@@ -117,6 +126,19 @@ def tile_array(
     return tiles
 
 
+def _triangular_ramp(n: int) -> np.ndarray:
+    """Fenêtre triangulaire 1D (0 exclu) qui culmine au centre
+
+    Utilisée pour pondérer davantage le centre d'une tuile que ses bords
+    lors du blending, ce qui atténue les artefacts de bloc aux jonctions
+    de tuiles qui se chevauchent
+    """
+    if n <= 1:
+        return np.ones(max(n, 1), dtype=np.float32)
+    ramp = np.minimum(np.arange(1, n + 1), np.arange(n, 0, -1)).astype(np.float32)
+    return ramp / ramp.max()
+
+
 def blend_mosaic(
     prob: np.ndarray,
     weight: np.ndarray,
@@ -125,7 +147,7 @@ def blend_mosaic(
     blend_mode: str = 'linear'
 ) -> None:
     """
-    Accumule les prédictions avec blending.
+    Accumule les prédictions avec blending
     
     Args:
         prob: Tableau de probabilités accumulées (C,H,W)
@@ -138,22 +160,26 @@ def blend_mosaic(
     
     # Créer un masque de blending
     if blend_mode == 'linear':
-        # Blending linéaire (plus de poids au centre)
-        mask = np.ones((h, w), dtype=np.float32)
-        # TODO: implémenter un vrai blending linéaire
+        # Fenêtre triangulaire 2D : poids maximal au centre de la tuile,
+        # minimal (mais non nul) sur les bords
+        ramp_y = _triangular_ramp(h)
+        ramp_x = _triangular_ramp(w)
+        mask = np.outer(ramp_y, ramp_x).astype(np.float32)
     elif blend_mode == 'gaussian':
-        # Blending gaussien
+        # Distribution gaussienne centrée
         from scipy.ndimage import gaussian_filter
-        mask = np.ones((h, w), dtype=np.float32)
-        mask = gaussian_filter(mask, sigma=h / 6)
+        mask = np.zeros((h, w), dtype=np.float32)
+        mask[h // 2, w // 2] = 1.0
+        mask = gaussian_filter(mask, sigma=max(h, w) / 6)
         mask = mask / mask.max()
     else:
+        # Pas de blending particulier
         mask = np.ones((h, w), dtype=np.float32)
     
-    # Broadcast le masque sur tous les canaux
+    # Adapter le masque à tous les canaux
     mask = mask[None, :, :]  # (1,h,w)
     
-    # Accumulation
+    # Accumuler les probabilités et poids
     prob[:, y:y+h, x:x+w] += patch[:, :h, :w] * mask
     weight[:, y:y+h, x:x+w] += mask
 
@@ -164,7 +190,7 @@ def save_tiles_manifest(
     metadata: Optional[Dict[str, Any]] = None
 ) -> None:
     """
-    Sauvegarde un manifest de tuiles avec métadonnées.
+    Sauvegarde un manifest de tuiles avec métadonnées
     
     Args:
         path: Chemin du fichier JSON
