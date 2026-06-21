@@ -179,7 +179,18 @@ class UNet(nn.Module):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
     
+    @staticmethod
+    def _match_size(x: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
+        """Aligne spatialement x sur ref si nécessaire (tailles non multiples du stride)."""
+        if x.shape[-2:] != ref.shape[-2:]:
+            x = nn.functional.interpolate(
+                x, size=ref.shape[-2:], mode="bilinear", align_corners=False
+            )
+        return x
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        input_size = x.shape[-2:]
+
         # Encodage
         feats = self.encoder(x)  # [C1, C2, C3, C4, C5]
         
@@ -190,28 +201,41 @@ class UNet(nn.Module):
         x = nn.functional.interpolate(
             x, scale_factor=2, mode="bilinear", align_corners=False
         )
+        x = self._match_size(x, feats[-2])
         skip4 = self.att4(x, feats[-2]) if self.use_attention else feats[-2]
         x = self.dec4(torch.cat([x, skip4], dim=1))
         
         x = nn.functional.interpolate(
             x, scale_factor=2, mode="bilinear", align_corners=False
         )
+        x = self._match_size(x, feats[-3])
         skip3 = self.att3(x, feats[-3]) if self.use_attention else feats[-3]
         x = self.dec3(torch.cat([x, skip3], dim=1))
         
         x = nn.functional.interpolate(
             x, scale_factor=2, mode="bilinear", align_corners=False
         )
+        x = self._match_size(x, feats[-4])
         skip2 = self.att2(x, feats[-4]) if self.use_attention else feats[-4]
         x = self.dec2(torch.cat([x, skip2], dim=1))
         
         x = nn.functional.interpolate(
             x, scale_factor=2, mode="bilinear", align_corners=False
         )
+        x = self._match_size(x, feats[-5])
         skip1 = self.att1(x, feats[-5]) if self.use_attention else feats[-5]
         x = self.dec1(torch.cat([x, skip1], dim=1))
         
         # Tête
         x = self.head(x)
-        
+
+        # feats[-5] est à stride 2 (stem de l'encodeur), donc x est encore à
+        # moitié résolution ici. On remonte explicitement à la résolution
+        # d'entrée pour garantir logits.shape[-2:] == x_input.shape[-2:],
+        # quelle que soit la taille d'entrée (y compris non multiple de 32).
+        if x.shape[-2:] != input_size:
+            x = nn.functional.interpolate(
+                x, size=input_size, mode="bilinear", align_corners=False
+            )
+
         return x
