@@ -189,8 +189,11 @@ if uploaded_file and ckpt_file:
             progress_bar.progress(60)
             status_text.text("Binarisation...")
             
-            # Binarisation
-            pred = (prob >= threshold).astype(np.uint8)
+            # Binarisation (binaire: seuillage du canal de proba; multi-classes: argmax)
+            if prob.shape[0] == 1:
+                pred = (prob[0] >= threshold).astype(np.uint8)[None, ...]
+            else:
+                pred = prob.argmax(axis=0).astype(np.uint8)[None, ...]
             
             # Post-traitement
             if apply_postprocess and task in ["buildings", "roads"]:
