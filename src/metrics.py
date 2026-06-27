@@ -4,7 +4,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from skimage.morphology import skeletonize
-from scipy.spatial.distance import directed_hausdorff
 import networkx as nx
 from typing import Dict
 import logging
@@ -121,7 +120,17 @@ def precision_recall_f1(pred: torch.Tensor, target: torch.Tensor, num_classes: i
 
 
 def bfscore(pred: torch.Tensor, target: torch.Tensor, threshold: float = 2.0) -> torch.Tensor:
-    """Boundary F-score amélioré avec gestion d'erreurs."""
+    """Boundary F-score amélioré avec gestion d'erreurs.
+
+    Pour chaque point du squelette prédit, on cherche son plus proche voisin
+    dans le squelette cible (et vice-versa) via un cKDTree, puis on seuille
+    ces distances point-à-point pour obtenir précision/rappel. (Une version
+    précédente comparait à tort `directed_hausdorff` -- une unique distance
+    scalaire dans le pire des cas -- ce qui levait systématiquement une
+    exception silencieusement absorbée, et BF valait donc toujours 0.)
+    """
+    from scipy.spatial import cKDTree
+
     if pred.ndim == 4:
         pred = pred.argmax(1)
     
@@ -147,13 +156,15 @@ def bfscore(pred: torch.Tensor, target: torch.Tensor, threshold: float = 2.0) ->
                 scores.append(0.0)
                 continue
             
-            # Hausdorff bidirectionnel
-            d1 = directed_hausdorff(a, b)[0]
-            d2 = directed_hausdorff(b, a)[0]
+            # Distances point-à-point au plus proche voisin (bidirectionnel)
+            tree_b = cKDTree(b)
+            dist_a_to_b, _ = tree_b.query(a)
+            tree_a = cKDTree(a)
+            dist_b_to_a, _ = tree_a.query(b)
             
             # Precision et recall basés sur le seuil
-            precision = (d1 < threshold).astype(float).mean() if len(a) > 0 else 0.0
-            recall = (d2 < threshold).astype(float).mean() if len(b) > 0 else 0.0
+            precision = float((dist_a_to_b < threshold).mean())
+            recall = float((dist_b_to_a < threshold).mean())
             
             if precision + recall > 0:
                 f_score = 2 * precision * recall / (precision + recall)
