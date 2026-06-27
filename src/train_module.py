@@ -10,16 +10,15 @@ import logging
 from .models.unet import UNet
 from .models.deeplabv3plus import DeepLabV3Plus
 from .models.swin_unet import SwinUNet
-from .losses import get_loss_function
+from .losses import get_loss_function, ComboLoss
 from .metrics import (iou_score, dice_score, bfscore, apls_score, 
                       precision_recall_f1, pixel_accuracy, MetricsTracker)
 
+
+
 logger = logging.getLogger(__name__)
-
-
 class SegLightningModule(pl.LightningModule):
-    """Module Lightning avec EMA, gradient clipping et logging avancé."""
-    
+    """Module Lightning avec EMA , gradient clipping et logging avancé des métriques """
     def __init__(
         self, 
         model_name: str = "unet", 
@@ -27,6 +26,11 @@ class SegLightningModule(pl.LightningModule):
         in_channels: int = 3, 
         encoder: str = "resnet34",
         decoder_channels: List[int] = [256, 128, 64, 32, 16],
+        use_attention: bool = False,
+        dropout: float = 0.0,
+        pretrained: bool = True,
+        backbone: str = "resnet101",
+        output_stride: int = 16,
         lr: float = 3e-4, 
         weight_decay: float = 1e-4, 
         optimizer: str = "adamw",
@@ -69,17 +73,24 @@ class SegLightningModule(pl.LightningModule):
                 encoder=self.hparams.encoder,
                 in_channels=self.hparams.in_channels,
                 num_classes=self.hparams.num_classes,
-                decoder_channels=self.hparams.decoder_channels
+                decoder_channels=self.hparams.decoder_channels,
+                use_attention=self.hparams.use_attention,
+                dropout=self.hparams.dropout,
+                pretrained=self.hparams.pretrained
             )
         elif self.hparams.model_name == "deeplabv3plus":
             return DeepLabV3Plus(
                 num_classes=self.hparams.num_classes,
-                in_channels=self.hparams.in_channels
+                in_channels=self.hparams.in_channels,
+                backbone=self.hparams.backbone,
+                output_stride=self.hparams.output_stride,
+                pretrained=self.hparams.pretrained
             )
         elif self.hparams.model_name == "swin_unet":
             return SwinUNet(
                 in_channels=self.hparams.in_channels,
-                num_classes=self.hparams.num_classes
+                num_classes=self.hparams.num_classes,
+                pretrained=self.hparams.pretrained
             )
         else:
             raise ValueError(f"Modèle inconnu: {self.hparams.model_name}")
@@ -98,15 +109,16 @@ class SegLightningModule(pl.LightningModule):
                     param.data, alpha=1 - self.hparams.ema_decay
                 )
     
-    def _shared_step(self, batch: tuple, stage: str) -> Dict[str, torch.Tensor]:
+    def _shared_step(self, batch: tuple, stage: str, net: Optional[nn.Module] = None) -> Dict[str, torch.Tensor]:
         """Step partagé avec calcul de toutes les métriques."""
         x, y = batch
+        net = net if net is not None else self.net
         
         # Forward pass
-        logits = self(x)
+        logits = net(x)
         
         # Loss
-        if isinstance(self.criterion, tuple):  # ComboLoss retourne (loss, dict)
+        if isinstance(self.criterion, ComboLoss):  # ComboLoss retourne (loss, dict)
             loss, loss_dict = self.criterion(logits, y)
         else:
             loss = self.criterion(logits, y)
@@ -150,24 +162,20 @@ class SegLightningModule(pl.LightningModule):
     def training_step(self, batch: tuple, batch_idx: int) -> torch.Tensor:
         output = self._shared_step(batch, "train")
         self.train_metrics.update(output['metrics'])
-        
-        # Update EMA
-        if self.ema_net is not None:
-            self._update_ema()
-        
         return output['loss']
     
-    def validation_step(self, batch: tuple, batch_idx: int) -> None:
-        # Utilise EMA si disponible
+    def on_train_batch_end(self, outputs, batch, batch_idx) -> None:
+        """Met à jour l'EMA après que l'optimizer ait appliqué le pas de gradient
+        (et non avant, comme le ferait un appel depuis training_step)."""
         if self.ema_net is not None:
-            with torch.no_grad():
-                x, y = batch
-                logits = self.ema_net(x)
-                # Recalcule les métriques avec EMA
-                # ... (similaire à _shared_step)
-        else:
-            output = self._shared_step(batch, "val")
-            self.val_metrics.update(output['metrics'])
+            self._update_ema()
+    
+    def validation_step(self, batch: tuple, batch_idx: int) -> None:
+        # Utilise les poids EMA pour l'évaluation si disponibles (ils donnent
+        # généralement une estimation plus stable de la généralisation).
+        net = self.ema_net if self.ema_net is not None else self.net
+        output = self._shared_step(batch, "val", net=net)
+        self.val_metrics.update(output['metrics'])
     
     def test_step(self, batch: tuple, batch_idx: int) -> None:
         self._shared_step(batch, "test")
