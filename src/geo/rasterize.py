@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Dict, Tuple, Optional
+import zlib
 import numpy as np
 import geopandas as gpd
 from rasterio import features, Affine
@@ -159,8 +160,10 @@ def multiclass_rasterize(
                 dtype='uint8'
             )
             
-            # Attribuer l'ID de classe
-            class_id = hash(str(cls)) % 255 + 1  # Simple hash
+            # Attribuer l'ID de classe (hash déterministe: zlib.crc32, stable
+            # entre processus, contrairement à hash() qui est aléatoire par
+            # défaut d'un run Python à l'autre - voir PYTHONHASHSEED).
+            class_id = zlib.crc32(str(cls).encode('utf-8')) % 255 + 1
             mask[temp_mask > 0] = class_id
     
     logger.info(f"Rasterisation multi-classes: {len(classes)} classes")

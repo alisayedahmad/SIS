@@ -1,9 +1,9 @@
 from __future__ import annotations
 import numpy as np
 from skimage.morphology import (
-    closing, opening, square, disk,
+    footprint_rectangle, disk, closing, opening, dilation,
     remove_small_objects, remove_small_holes,
-    skeletonize, binary_dilation
+    skeletonize
 )
 from scipy import ndimage
 import logging
@@ -40,20 +40,21 @@ def postprocess_prediction(
     
     if kind == "buildings":
         # Fermeture pour combler les trous
-        selem_close = square(closing_size)
-        mask_bool = closing(mask_bool, selem_close)
+        footprint_close = footprint_rectangle((closing_size, closing_size))
+        mask_bool = closing(mask_bool, footprint_close)
         
         # Ouverture pour lisser les contours
-        selem_open = square(opening_size)
-        mask_bool = opening(mask_bool, selem_open)
+        footprint_open = footprint_rectangle((opening_size, opening_size))
+        mask_bool = opening(mask_bool, footprint_open)
         
         # Suppression des petits objets
-        mask_bool = remove_small_objects(mask_bool, min_size=min_size)
+        mask_bool = remove_small_objects(mask_bool, max_size=min_size)
         
         # Remplissage des petits trous
-        mask_bool = remove_small_holes(mask_bool, area_threshold=min_size // 2)
+        mask_bool = remove_small_holes(mask_bool, max_size=min_size // 2)
         
-        logger.info(f"Bâtiments: {np.unique(ndimage.label(mask_bool)[1][-1])} objets détectés")
+        num_objects = ndimage.label(mask_bool)[1]
+        logger.info(f"Bâtiments: {num_objects} objets détectés")
     
     elif kind == "roads":
         # Squelettisation pour extraire le réseau routier
@@ -61,16 +62,16 @@ def postprocess_prediction(
         
         # Dilatation légère pour élargir les routes
         selem_dilate = disk(1)
-        mask_bool = binary_dilation(mask_skel, selem_dilate)
+        mask_bool = dilation(mask_skel, selem_dilate)
         
         # Suppression des petits fragments
-        mask_bool = remove_small_objects(mask_bool, min_size=min_size // 2)
+        mask_bool = remove_small_objects(mask_bool, max_size=min_size // 2)
         
         logger.info(f"Routes: squelettisation appliquée")
     
     elif kind == "multi":
         # Pour multi-classes, appliquer un nettoyage léger
-        mask_bool = remove_small_objects(mask_bool, min_size=min_size // 2)
+        mask_bool = remove_small_objects(mask_bool, max_size=min_size // 2)
     
     else:
         logger.warning(f"Type inconnu: {kind}. Aucun post-traitement appliqué.")

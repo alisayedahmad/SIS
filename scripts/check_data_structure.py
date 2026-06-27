@@ -1,7 +1,3 @@
-"""
-Script pour vérifier la structure des données avant preprocessing.
-"""
-
 import argparse
 from pathlib import Path
 import logging
@@ -15,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 def check_spacenet2_structure(root: Path) -> dict:
     """
-    Vérifie la structure d'un dataset SpaceNet 2.
+    Vérifie la structure d'un dataset SpaceNet 2
     
     Returns:
         dict avec statistiques
@@ -201,7 +197,12 @@ def main():
     
     if args.dataset == 'spacenet2':
         stats = check_spacenet2_structure(root)
-    # Ajouter spacenet3, deepglobe si besoin
+    else:
+        logger.error(
+            f"✗ Vérification non implémentée pour le dataset '{args.dataset}'. "
+            f"Seul 'spacenet2' est actuellement supporté par ce script."
+        )
+        return
     
     # Afficher les erreurs
     if stats['errors']:

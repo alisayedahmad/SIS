@@ -28,7 +28,7 @@ def setup_callbacks(cfg: Dict[str, Any]) -> list:
     checkpoint_cb = ModelCheckpoint(
         dirpath=f"checkpoints/{cfg['model']['name']}_{cfg['task']}",
         filename='{epoch:02d}-{val_mIoU:.4f}',
-        monitor=cfg.get("monitor", "val_mIoU"),
+        monitor=cfg.get("metrics", {}).get("monitor", "val_mIoU"),
         mode="max",
         save_top_k=3,
         save_last=True,
@@ -43,7 +43,7 @@ def setup_callbacks(cfg: Dict[str, Any]) -> list:
     # Early stopping
     if cfg['train'].get('early_stopping', False):
         early_stop = EarlyStopping(
-            monitor=cfg.get("monitor", "val_mIoU"),
+            monitor=cfg.get("metrics", {}).get("monitor", "val_mIoU"),
             patience=cfg['train'].get('early_stopping_patience', 10),
             mode='max',
             verbose=True,
@@ -116,7 +116,7 @@ def validate_config(cfg: Dict[str, Any]) -> None:
     logger.info("✓ Configuration validée")
 
 
-def main(cfg_path: str, resume_from: str = None, test_only: bool = False):
+def main(cfg_path: str, resume_from: str = None, test_only: bool = False, fast_dev_run: bool = False):
     """
     Fonction principale d'entraînement.
     
@@ -124,6 +124,7 @@ def main(cfg_path: str, resume_from: str = None, test_only: bool = False):
         cfg_path: Chemin vers le fichier de configuration YAML
         resume_from: Chemin vers un checkpoint pour reprendre l'entraînement
         test_only: Exécuter uniquement le test (pas d'entraînement)
+        fast_dev_run: Mode développement rapide (1 batch train/val, pas de checkpoint/logger)
     """
     # Configuration du logging
     setup_logging(log_dir="logs", level=logging.INFO)
@@ -164,6 +165,11 @@ def main(cfg_path: str, resume_from: str = None, test_only: bool = False):
         in_channels=cfg["model"].get("in_channels", 3),
         encoder=cfg["model"].get("encoder", "resnet34"),
         decoder_channels=cfg["model"].get("decoder_channels", [256, 128, 64, 32, 16]),
+        use_attention=cfg["model"].get("use_attention", False),
+        dropout=cfg["model"].get("dropout", 0.0),
+        pretrained=cfg["model"].get("pretrained", True),
+        backbone=cfg["model"].get("backbone", "resnet101"),
+        output_stride=cfg["model"].get("output_stride", 16),
         lr=cfg["train"]["lr"],
         weight_decay=cfg["train"]["weight_decay"],
         optimizer=cfg["train"].get("optimizer", "adamw"),
@@ -172,7 +178,7 @@ def main(cfg_path: str, resume_from: str = None, test_only: bool = False):
         use_ema=cfg["train"].get("use_ema", False),
         ema_decay=cfg["train"].get("ema_decay", 0.999),
         gradient_clip_val=cfg["train"].get("gradient_clip_val", 1.0),
-        compute_apls=cfg.get("compute_apls", False)
+        compute_apls=cfg.get("metrics", {}).get("compute_apls", False)
     )
     
     # Callbacks
@@ -211,7 +217,8 @@ def main(cfg_path: str, resume_from: str = None, test_only: bool = False):
         benchmark=False,  # Pour reproductibilité
         enable_model_summary=True,
         enable_progress_bar=True,
-        enable_checkpointing=True
+        enable_checkpointing=True,
+        fast_dev_run=fast_dev_run
     )
     
     # Log des hyperparamètres
@@ -229,10 +236,14 @@ def main(cfg_path: str, resume_from: str = None, test_only: bool = False):
         logger.info("ENTRAÎNEMENT TERMINÉ")
         logger.info("=" * 80)
         
-        # Meilleur checkpoint
+        # Meilleur checkpoint (peut être absent en fast_dev_run, ou si aucune
+        # époque de validation complète n'a eu lieu)
         best_model_path = trainer.checkpoint_callback.best_model_path
-        logger.info(f"Meilleur modèle sauvegardé: {best_model_path}")
-        logger.info(f"Meilleur score: {trainer.checkpoint_callback.best_model_score:.4f}")
+        best_model_score = trainer.checkpoint_callback.best_model_score
+        if best_model_path:
+            logger.info(f"Meilleur modèle sauvegardé: {best_model_path}")
+        if best_model_score is not None:
+            logger.info(f"Meilleur score: {best_model_score:.4f}")
     
     # Test
     logger.info("=" * 80)
@@ -241,14 +252,25 @@ def main(cfg_path: str, resume_from: str = None, test_only: bool = False):
     
     if resume_from and test_only:
         test_results = trainer.test(model, datamodule=dm, ckpt_path=resume_from)
-    else:
+    elif not test_only and trainer.checkpoint_callback.best_model_path:
         test_results = trainer.test(model, datamodule=dm, ckpt_path="best")
+    else:
+        # Pas de checkpoint "best" disponible (fast_dev_run, ou test_only sans
+        # --resume): on teste avec les poids actuellement en mémoire plutôt
+        # que de planter sur ckpt_path="best".
+        logger.warning(
+            "Aucun checkpoint 'best' disponible - test avec les poids actuels en mémoire."
+        )
+        test_results = trainer.test(model, datamodule=dm)
     
     logger.info("=" * 80)
     logger.info("RÉSULTATS DU TEST")
     logger.info("=" * 80)
     for key, value in test_results[0].items():
-        logger.info(f"{key}: {value:.4f}")
+        try:
+            logger.info(f"{key}: {value:.4f}")
+        except (TypeError, ValueError):
+            logger.info(f"{key}: {value}")
     
     logger.info("=" * 80)
     logger.info("PIPELINE TERMINÉ")
@@ -283,7 +305,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     try:
-        main(args.config, resume_from=args.resume, test_only=args.test_only)
+        main(
+            args.config,
+            resume_from=args.resume,
+            test_only=args.test_only,
+            fast_dev_run=args.fast_dev_run
+        )
     except Exception as e:
         logger.exception("Erreur fatale durant l'entraînement")
         raise e

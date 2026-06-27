@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models.segmentation import deeplabv3_resnet101, deeplabv3_resnet50
+from torchvision.models._utils import IntermediateLayerGetter
 from typing import Optional
 import logging
 
@@ -123,20 +124,42 @@ class DeepLabV3Plus(nn.Module):
         # Backbone
         if backbone == 'resnet101':
             logger.info("Création DeepLabV3+ avec ResNet101")
-            if pretrained:
-                base_model = deeplabv3_resnet101(weights='DEFAULT')
-            else:
-                base_model = deeplabv3_resnet101(weights=None)
+            base_model = deeplabv3_resnet101(
+                weights=None,
+                weights_backbone='DEFAULT' if pretrained else None
+            )
         elif backbone == 'resnet50':
             logger.info("Création DeepLabV3+ avec ResNet50")
-            if pretrained:
-                base_model = deeplabv3_resnet50(weights='DEFAULT')
-            else:
-                base_model = deeplabv3_resnet50(weights=None)
+            base_model = deeplabv3_resnet50(
+                weights=None,
+                weights_backbone='DEFAULT' if pretrained else None
+            )
         else:
             raise ValueError(f"Backbone non supporté: {backbone}")
+
+        if output_stride != 8:
+            # torchvision's deeplabv3_resnet* backbones are always built with
+            # replace_stride_with_dilation=[False, True, True], i.e. an
+            # effective output_stride of 8 for the 'out' feature. This
+            # implementation does not (yet) support rebuilding the backbone
+            # for a different output_stride, so we surface that instead of
+            # silently ignoring the parameter.
+            logger.warning(
+                f"output_stride={output_stride} demandé mais ignoré: le backbone "
+                f"torchvision utilisé est toujours construit avec un stride "
+                f"effectif de 8 pour la branche 'out'."
+            )
         
-        self.backbone = base_model.backbone
+        # torchvision's deeplabv3_resnet*().backbone only exposes the final
+        # 'out' feature (stride 16) via its own IntermediateLayerGetter; it
+        # never returns a 'low_level' feature (plain DeepLabV3, unlike
+        # DeepLabV3+, has no low-level branch). We rewrap the same ResNet
+        # layers ourselves to additionally expose layer1 (stride 4,
+        # low-level), which the "+" decoder below actually needs.
+        self.backbone = IntermediateLayerGetter(
+            base_model.backbone,
+            return_layers={'layer1': 'low_level', 'layer4': 'out'}
+        )
         
         # Adapter premier conv si nécessaire
         if in_channels != 3:

@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import numpy as np
 import rasterio
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 from torch.utils.data import Dataset, DataLoader
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
@@ -37,10 +37,19 @@ class TileDataset(Dataset):
             raise FileNotFoundError(f"Manifest introuvable: {manifest_path}")
         
         with open(manifest_path, "r", encoding="utf-8") as f:
-            items = json.load(f)
+            manifest = json.load(f)
         
-        # Validation des chemins
-        items = [it for it in items if Path(it['image']).exists() and Path(it['mask']).exists()]
+        # save_tiles_manifest() écrit {'version', 'num_tiles', 'items': [...]},
+        # pas une simple liste. On reste tolérant aux deux formats.
+        items = manifest["items"] if isinstance(manifest, dict) else manifest
+        
+        # Les chemins du manifest sont relatifs à la racine du dataset
+        # (cf. `img_out.relative_to(self.output)` dans les scripts
+        # prepare_*.py), pas au répertoire courant du process.
+        items = [
+            it for it in items
+            if (self.root / it['image']).exists() and (self.root / it['mask']).exists()
+        ]
         logger.info(f"Dataset chargé: {len(items)} tuiles valides trouvées")
         
         # Split stratifié optionnel
@@ -118,11 +127,13 @@ class TileDataset(Dataset):
         return A.Compose(transforms)
 
     def _read(self, p: str, use_cache: bool = True) -> np.ndarray:
-        """Lecture avec cache LRU."""
+        """Lecture avec cache LRU. `p` est un chemin relatif à self.root
+        (tel que stocké dans le manifest) ou un chemin déjà absolu."""
         if use_cache and p in self.cache:
             return self.cache[p]
         
-        with rasterio.open(p) as src:
+        full_path = self.root / p
+        with rasterio.open(full_path) as src:
             arr = src.read()
         
         if use_cache and len(self.cache) < self.cache_size:
@@ -196,6 +207,16 @@ class TilesDataModule(pl.LightningDataModule):
         
         logger.info(f"Datasets créés: Train={len(self.train_ds)}, Val={len(self.val_ds)}, Test={len(self.test_ds)}")
     
+    def _worker_kwargs(self) -> Dict:
+        """prefetch_factor / persistent_workers ne sont valides que si
+        num_workers > 0 (PyTorch lève une ValueError sinon)."""
+        if self.hparams.num_workers > 0:
+            return {
+                'prefetch_factor': self.hparams.get('prefetch_factor', 2),
+                'persistent_workers': self.hparams.get('persistent_workers', True),
+            }
+        return {}
+
     def train_dataloader(self) -> DataLoader:
         return DataLoader(
             self.train_ds, 
@@ -203,9 +224,8 @@ class TilesDataModule(pl.LightningDataModule):
             shuffle=True,  
             num_workers=self.hparams.num_workers, 
             pin_memory=True,
-            prefetch_factor=self.hparams.get('prefetch_factor', 2),
-            persistent_workers=self.hparams.get('persistent_workers', True),
-            drop_last=True  # Pour stabiliser le batch norm
+            drop_last=True,  # Pour stabiliser le batch norm
+            **self._worker_kwargs()
         )
     
     def val_dataloader(self) -> DataLoader:
@@ -215,8 +235,7 @@ class TilesDataModule(pl.LightningDataModule):
             shuffle=False, 
             num_workers=self.hparams.num_workers, 
             pin_memory=True,
-            prefetch_factor=self.hparams.get('prefetch_factor', 2),
-            persistent_workers=self.hparams.get('persistent_workers', True)
+            **self._worker_kwargs()
         )
     
     def test_dataloader(self) -> DataLoader:
