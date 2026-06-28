@@ -9,3 +9,19 @@ outputs/
 .ipynb_checkpoints/
 *.ckpt
 *.pt
+# Data
+data/raw/
+data/tiles/
+outputs/
+lightning_logs/
+checkpoints/
+
+# Cache
+.pytest_cache/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Logs
+logs/
+*.log
