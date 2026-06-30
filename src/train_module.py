@@ -108,6 +108,15 @@ class SegLightningModule(pl.LightningModule):
                 ema_param.data.mul_(self.hparams.ema_decay).add_(
                     param.data, alpha=1 - self.hparams.ema_decay
                 )
+            # Les buffers (running_mean/running_var des couches BatchNorm) ne
+            # sont PAS retournés par parameters() — sans cette copie, ema_net
+            # garde des statistiques BatchNorm figées à leur valeur initiale
+            # (quasi aléatoire pour le décodeur, jamais entraîné). Comme la
+            # validation tourne en mode eval() avec ema_net, BatchNorm utilise
+            # alors ces statistiques figées et fausses, ce qui produit des
+            # logits aberrants et fait exploser la loss de validation.
+            for ema_buf, buf in zip(self.ema_net.buffers(), self.net.buffers()):
+                ema_buf.data.copy_(buf.data)
     
     def _shared_step(self, batch: tuple, stage: str, net: Optional[nn.Module] = None) -> Dict[str, torch.Tensor]:
         """Step partagé avec calcul de toutes les métriques."""
