@@ -171,29 +171,47 @@ def main(
     if geojson:
         logger.info(f"Vectorisation et export GeoJSON: {geojson}")
         try:
-            gdf = mask_to_polygons(
-                mask=pred,
-                transform=meta['transform'],
-                crs=meta['crs']
-            )
-            
-            logger.info(f"  - {len(gdf)} polygones générés")
-            
-            # Ajout de métadonnées
-            gdf['area'] = gdf.geometry.area
-            gdf['perimeter'] = gdf.geometry.length
-            
-            # Filtrage des petits polygones (optionnel)
-            min_area = 10  # mètres carrés (ajuster selon besoin)
-            gdf = gdf[gdf['area'] >= min_area]
-            logger.info(f"  - {len(gdf)} polygones après filtrage (aire >= {min_area})")
-            
-            gdf.to_file(geojson, driver='GeoJSON')
-            logger.info("✓ GeoJSON sauvegardé")
-            
+            import json
+            from rasterio import features as rio_features
+            from shapely.geometry import shape, mapping
+
+            # On bypasse geopandas/pandas entièrement pour éviter le crash
+            # pyarrow sur Windows. On utilise rasterio.features.shapes()
+            # directement et on écrit le GeoJSON avec le module json standard.
+            polygons = []
+            for geom, val in rio_features.shapes(
+                pred.astype("uint8"),
+                transform=meta["transform"],
+                connectivity=8,
+            ):
+                if int(val) == 0:
+                    continue
+                poly = shape(geom)
+                if poly.area < 10 or not poly.is_valid or poly.is_empty:
+                    continue
+                polygons.append({
+                    "type": "Feature",
+                    "geometry": mapping(poly),
+                    "properties": {
+                        "area": float(poly.area),
+                        "perimeter": float(poly.length),
+                    },
+                })
+
+            geojson_dict = {
+                "type": "FeatureCollection",
+                "features": polygons,
+            }
+
+            Path(geojson).parent.mkdir(parents=True, exist_ok=True)
+            with open(geojson, "w", encoding="utf-8") as fout:
+                json.dump(geojson_dict, fout)
+
+            logger.info(f"  - {len(polygons)} polygones sauvegardés")
+            logger.info("GeoJSON sauvegarde OK")
+
         except Exception as e:
             logger.error(f"Erreur lors de la vectorisation: {e}")
-    
     # Statistiques finales
     logger.info("=" * 80)
     logger.info("RÉSUMÉ")
