@@ -6,9 +6,7 @@ from torchvision.models.segmentation import deeplabv3_resnet101, deeplabv3_resne
 from torchvision.models._utils import IntermediateLayerGetter
 from typing import Optional
 import logging
-
 logger = logging.getLogger(__name__)
-
 
 class ASPPConv(nn.Sequential):
     """Convolution ASPP avec dilatation."""
@@ -28,16 +26,14 @@ class ASPPConv(nn.Sequential):
         ]
         super().__init__(*modules)
 
-
 class ASPPPooling(nn.Sequential):
-    """Pooling global avec projection."""
-    
+    """Pooling global avec projection"""
     def __init__(self, in_channels: int, out_channels: int):
         super().__init__(
             nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False),
-            nn.BatchNorm2d(out_channels),
+            nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=True),  # bias=True car pas de BN
             nn.ReLU(inplace=True)
+
         )
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -138,24 +134,14 @@ class DeepLabV3Plus(nn.Module):
             raise ValueError(f"Backbone non supporté: {backbone}")
 
         if output_stride != 8:
-            # torchvision's deeplabv3_resnet* backbones are always built with
-            # replace_stride_with_dilation=[False, True, True], i.e. an
-            # effective output_stride of 8 for the 'out' feature. This
-            # implementation does not (yet) support rebuilding the backbone
-            # for a different output_stride, so we surface that instead of
-            # silently ignoring the parameter.
+
             logger.warning(
                 f"output_stride={output_stride} demandé mais ignoré: le backbone "
                 f"torchvision utilisé est toujours construit avec un stride "
                 f"effectif de 8 pour la branche 'out'."
             )
         
-        # torchvision's deeplabv3_resnet*().backbone only exposes the final
-        # 'out' feature (stride 16) via its own IntermediateLayerGetter; it
-        # never returns a 'low_level' feature (plain DeepLabV3, unlike
-        # DeepLabV3+, has no low-level branch). We rewrap the same ResNet
-        # layers ourselves to additionally expose layer1 (stride 4,
-        # low-level), which the "+" decoder below actually needs.
+       
         self.backbone = IntermediateLayerGetter(
             base_model.backbone,
             return_layers={'layer1': 'low_level', 'layer4': 'out'}
