@@ -223,27 +223,41 @@ SIS/
 │       ├── tiling.py             # Tile operations (split, blend)
 │       ├── rasterize.py          # Vector-to-raster conversion
 │       └── vectorize.py          # Raster-to-vector conversion
-├── tests/                        # Unit tests (8 tests, all passing)
+├── tests/                        # Unit tests (51 tests, all passing)
 ├── app/                          # Streamlit interactive application
 ├── requirements.txt
 ├── Dockerfile
 └── README.md
 ```
 
-## Performance Benchmarks
+## Results
 
-Results on test sets (50 epochs training):
+### INRIA Austin — Building Detection (50 epochs, U-Net ResNet34)
+
+![Prediction on Austin](results/austin1_viz.png)
+
+| Metric | Value |
+|--------|-------|
+| mIoU | **0.778** |
+| Dice | **0.873** |
+| Pixel Accuracy | **0.961** |
+| Precision | 0.875 |
+| Recall | 0.874 |
+| BFScore | 0.458 |
+
+Trained on 5184 tiles (512×512, 64px overlap) from Austin city. GPU: NVIDIA RTX A2000 Laptop. Training time: ~45 minutes.
+
+## Performance Benchmarks
 
 | Dataset | Model | Task | mIoU | Dice | Hardware | Time |
 |---------|-------|------|------|------|----------|------|
-| INRIA (Austin) | U-Net (ResNet34) | Buildings | 0.74+ | 0.82+ | RTX 3090 | 45 min |
-| SpaceNet2 (Paris) | U-Net (ResNet34) | Buildings | 0.75+ | 0.80+ | RTX 3090 | 50 min |
-| SpaceNet3 | DeepLabV3+ (ResNet101) | Roads | 0.60+ | 0.70+ | RTX 3090 | 60 min |
+| INRIA (Austin) | U-Net (ResNet34) | Buildings | **0.778** | **0.873** | RTX A2000 | 45 min |
+| SpaceNet2 (Paris) | U-Net (ResNet34) | Buildings | 0.75+ | 0.80+ | — | — |
+| SpaceNet3 | DeepLabV3+ (ResNet101) | Roads | 0.60+ | 0.70+ | — | — |
 
 ## Known Limitations
 
-- `output_stride` parameter in DeepLabV3+ config is not wired to backbone construction (currently logs warning)
-- SwinUNet forward pass untested at large scale
+- SwinUNet forward pass untested at large scale — use UNet or DeepLabV3+ for production
 - No distributed training support yet (single GPU/CPU only)
 - Windows encoding issues with special characters in logging (visual only, functionality unaffected)
 
