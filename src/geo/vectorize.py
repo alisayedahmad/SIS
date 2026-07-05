@@ -81,14 +81,22 @@ def mask_to_polygons(
         return gpd.GeoDataFrame(columns=['geometry'], crs=crs)
     
     gdf = gpd.GeoDataFrame(geometry=polygons, crs=crs)
-    
-    # Attributs géométriques
-    gdf['area'] = gdf.geometry.area
-    gdf['perimeter'] = gdf.geometry.length
+
+    # Les calculs d'aire/périmètre en degrés n'ont pas de sens.
+    # On reprojette en UTM (mètres) juste pour ces calculs, puis on revient au CRS d'origine.
+    try:
+        gdf_proj = gdf.to_crs(gdf.estimate_utm_crs())
+        gdf['area'] = gdf_proj.geometry.area
+        gdf['perimeter'] = gdf_proj.geometry.length
+    except Exception:
+        # Si la reprojection échoue (CRS absent, etc.), on garde les valeurs brutes
+        gdf['area'] = gdf.geometry.area
+        gdf['perimeter'] = gdf.geometry.length
+
     gdf['compactness'] = (4 * np.pi * gdf['area']) / (gdf['perimeter'] ** 2)
-    
+
     logger.info(f"GeoDataFrame créé: {len(gdf)} features")
-    
+
     return gdf
 
 

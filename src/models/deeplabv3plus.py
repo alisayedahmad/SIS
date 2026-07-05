@@ -6,7 +6,9 @@ from torchvision.models.segmentation import deeplabv3_resnet101, deeplabv3_resne
 from torchvision.models._utils import IntermediateLayerGetter
 from typing import Optional
 import logging
+
 logger = logging.getLogger(__name__)
+
 
 class ASPPConv(nn.Sequential):
     """Convolution ASPP avec dilatation."""
@@ -26,14 +28,15 @@ class ASPPConv(nn.Sequential):
         ]
         super().__init__(*modules)
 
+
 class ASPPPooling(nn.Sequential):
-    """Pooling global avec projection"""
+    """Pooling global avec projection."""
+    
     def __init__(self, in_channels: int, out_channels: int):
         super().__init__(
             nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=True),  # bias=True car pas de BN
-            nn.ReLU(inplace=True)
-
+            nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=True),
+            nn.ReLU(inplace=True),
         )
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -101,7 +104,6 @@ class DeepLabV3Plus(nn.Module):
         num_classes: Nombre de classes
         in_channels: Canaux d'entrée
         backbone: 'resnet50' ou 'resnet101'
-        output_stride: 8 ou 16
         pretrained: Utiliser poids pré-entraînés
     """
     
@@ -110,7 +112,6 @@ class DeepLabV3Plus(nn.Module):
         num_classes: int = 2,
         in_channels: int = 3,
         backbone: str = 'resnet101',
-        output_stride: int = 16,
         pretrained: bool = True
     ):
         super().__init__()
@@ -133,15 +134,6 @@ class DeepLabV3Plus(nn.Module):
         else:
             raise ValueError(f"Backbone non supporté: {backbone}")
 
-        if output_stride != 8:
-
-            logger.warning(
-                f"output_stride={output_stride} demandé mais ignoré: le backbone "
-                f"torchvision utilisé est toujours construit avec un stride "
-                f"effectif de 8 pour la branche 'out'."
-            )
-        
-       
         self.backbone = IntermediateLayerGetter(
             base_model.backbone,
             return_layers={'layer1': 'low_level', 'layer4': 'out'}
